@@ -1,6 +1,6 @@
 //! Media (audio/video) related content.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,7 +21,7 @@ use crate::format::Vp9PacketizerMode;
 use crate::sdp::Simulcast as SdpSimulcast;
 use crate::sdp::{MediaLine, Msid, is_no_stream};
 use crate::streams::{RtpPacket, Streams};
-use crate::util::{DetHashMap, already_happened};
+use crate::util::{already_happened, sorted_by_key_mut};
 
 mod event;
 pub use event::*;
@@ -133,10 +133,10 @@ pub struct Media {
     //
     /// Buffers of incoming RTP packets. These do reordering/jitter buffer and also
     /// depayload from RTP to frames.
-    depayloaders: DetHashMap<(Pt, Option<Rid>), DepacketizingBuffer>,
+    depayloaders: HashMap<(Pt, Option<Rid>), DepacketizingBuffer>,
 
     /// Payloaders for outoing RTP packets.
-    payloaders: DetHashMap<(Pt, Option<Rid>), PayloaderEntry>,
+    payloaders: HashMap<(Pt, Option<Rid>), PayloaderEntry>,
 
     /// Whether outgoing packets are wrapped in RFC 2198 RED right now. RED availability is fixed at
     /// negotiation (or set up via DirectAPI); this is the runtime send-side lever, toggled with no
@@ -350,7 +350,7 @@ impl Media {
         now: Instant,
         reordering_timeout: Option<Duration>,
     ) -> Result<Option<MediaData>, RtcError> {
-        for ((pt, rid), buf) in &mut self.depayloaders {
+        for ((pt, rid), buf) in sorted_by_key_mut(&mut self.depayloaders) {
             if let Some(r) = buf.pop(now, reordering_timeout) {
                 let dep = r.map_err(|e| RtcError::Packet(self.mid, *pt, e))?;
                 let Some(codec) = params.iter().find(|c| c.pt() == *pt) else {
@@ -720,8 +720,8 @@ impl Default for Media {
             simulcast: None,
             rids_rx: Rids::Any,
             rids_tx: Rids::None,
-            payloaders: DetHashMap::default(),
-            depayloaders: DetHashMap::default(),
+            payloaders: HashMap::new(),
+            depayloaders: HashMap::new(),
             to_payload: VecDeque::default(),
             last_tele_end: None,
             need_open_event: true,

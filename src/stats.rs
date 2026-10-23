@@ -1,13 +1,12 @@
 //! Statistics events.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use crate::Bitrate;
 use crate::rtp::SeqNo;
 use crate::rtp_::{Mid, Rid};
-use crate::util::DetHashMap;
 use crate::{io::Protocol, rtp_::MidRid};
 
 pub(crate) struct Stats {
@@ -24,8 +23,8 @@ pub(crate) struct StatsSnapshot {
     pub egress_loss_fraction: Option<f32>,
     pub ingress_loss_fraction: Option<f32>,
     pub rtt: Option<Duration>,
-    pub ingress: DetHashMap<MidRid, MediaIngressStats>,
-    pub egress: DetHashMap<MidRid, MediaEgressStats>,
+    pub ingress: HashMap<MidRid, MediaIngressStats>,
+    pub egress: HashMap<MidRid, MediaEgressStats>,
     pub bwe_tx: Option<Bitrate>,
     pub selected_candidate_pair: Option<CandidatePairStats>,
     timestamp: Instant,
@@ -40,8 +39,8 @@ impl StatsSnapshot {
             rx: 0,
             egress_loss_fraction: None,
             ingress_loss_fraction: None,
-            ingress: DetHashMap::default(),
-            egress: DetHashMap::default(),
+            ingress: HashMap::new(),
+            egress: HashMap::new(),
             rtt: None,
             bwe_tx: None,
             selected_candidate_pair: None,
@@ -312,11 +311,16 @@ impl Stats {
 
         self.events.push_back(StatsEvent::Peer(event));
 
-        for (_, event) in snapshot.ingress.drain() {
+        // Key order, so the event order does not depend on hasher state.
+        let mut ingress: Vec<_> = snapshot.ingress.drain().collect();
+        ingress.sort_unstable_by_key(|(k, _)| *k);
+        for (_, event) in ingress {
             self.events.push_back(StatsEvent::MediaIngress(event));
         }
 
-        for (_, event) in snapshot.egress.drain() {
+        let mut egress: Vec<_> = snapshot.egress.drain().collect();
+        egress.sort_unstable_by_key(|(k, _)| *k);
+        for (_, event) in egress {
             self.events.push_back(StatsEvent::MediaEgress(event));
         }
 

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{self};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +16,7 @@ use crate::rtp_::{Bitrate, Pt};
 use crate::rtp_::{MediaTime, SenderInfo};
 use crate::rtp_::{Mid, Rid, SeqNo};
 use crate::rtp_::{Rtcp, RtpHeader};
-use crate::util::{DetHashMap, already_happened};
+use crate::util::{already_happened, sorted_by_key_mut};
 
 pub use self::receive::StreamRx;
 pub use self::send::{RtpWrite, StreamTx, StreamTxQueueInfo};
@@ -124,17 +124,17 @@ impl RtpPacket {
 #[derive(Debug)]
 pub(crate) struct Streams {
     /// All incoming encoded streams.
-    streams_rx: DetHashMap<Ssrc, StreamRx>,
+    streams_rx: HashMap<Ssrc, StreamRx>,
 
     /// Each incoming SSRC is mapped to a Mid/Ssrc. The Ssrc in the value is for the case
     /// where the incoming SSRC is for an RTX and we want the "main".
-    rx_lookup: DetHashMap<Ssrc, RxLookup>,
+    rx_lookup: HashMap<Ssrc, RxLookup>,
 
     /// Time we last cleaned up unused entries from source_keys_rx.
     last_rx_lookup_cleanup: Instant,
 
     /// All outgoing encoded streams.
-    streams_tx: DetHashMap<Ssrc, StreamTx>,
+    streams_tx: HashMap<Ssrc, StreamTx>,
 
     /// Non-media padding source. Its sequence counter survives media changes.
     probe_tx: StreamTx,
@@ -448,7 +448,7 @@ impl Streams {
             }
         }
 
-        for stream in self.streams_rx.values_mut() {
+        for (_, stream) in sorted_by_key_mut(&mut self.streams_rx) {
             stream.maybe_create_keyframe_request(sender_ssrc, feedback);
             stream.maybe_create_remb_request(sender_ssrc, feedback);
 
@@ -471,7 +471,7 @@ impl Streams {
             }
         }
 
-        for stream in self.streams_tx.values_mut() {
+        for (_, stream) in sorted_by_key_mut(&mut self.streams_tx) {
             let mid = stream.mid();
 
             // All StreamTx belonging to the same Mid are reported together.
@@ -495,37 +495,43 @@ impl Streams {
     }
 
     pub(crate) fn poll_keyframe_request(&mut self) -> Option<KeyframeRequest> {
-        self.streams_tx.values_mut().find_map(|s| {
-            let kind = s.poll_keyframe_request()?;
-            Some(KeyframeRequest {
-                mid: s.mid(),
-                rid: s.rid(),
-                kind,
+        sorted_by_key_mut(&mut self.streams_tx)
+            .into_iter()
+            .find_map(|(_, s)| {
+                let kind = s.poll_keyframe_request()?;
+                Some(KeyframeRequest {
+                    mid: s.mid(),
+                    rid: s.rid(),
+                    kind,
+                })
             })
-        })
     }
 
     pub(crate) fn poll_sender_feedback(&mut self) -> Option<SenderFeedback> {
-        self.streams_rx.values_mut().find_map(|s| {
-            let (sender_info, at) = s.poll_sender_info()?;
+        sorted_by_key_mut(&mut self.streams_rx)
+            .into_iter()
+            .find_map(|(_, s)| {
+                let (sender_info, at) = s.poll_sender_info()?;
 
-            Some(SenderFeedback {
-                mid: s.mid(),
-                rid: s.rid(),
-                received_at: at,
-                sender_info,
+                Some(SenderFeedback {
+                    mid: s.mid(),
+                    rid: s.rid(),
+                    received_at: at,
+                    sender_info,
+                })
             })
-        })
     }
 
     pub(crate) fn poll_remb_request(&mut self) -> Option<(Mid, Bitrate)> {
-        self.streams_tx
-            .values_mut()
-            .find_map(|s| s.poll_remb_request().map(|b| (s.mid(), b)))
+        sorted_by_key_mut(&mut self.streams_tx)
+            .into_iter()
+            .find_map(|(_, s)| s.poll_remb_request().map(|b| (s.mid(), b)))
     }
 
     pub(crate) fn poll_stream_paused(&mut self) -> Option<StreamPaused> {
-        self.streams_rx.values_mut().find_map(|s| s.poll_paused())
+        sorted_by_key_mut(&mut self.streams_rx)
+            .into_iter()
+            .find_map(|(_, s)| s.poll_paused())
     }
 
     pub(crate) fn has_stream_rx(&self, ssrc: Ssrc) -> bool {
@@ -537,11 +543,15 @@ impl Streams {
     }
 
     pub(crate) fn streams_rx(&mut self) -> impl Iterator<Item = &mut StreamRx> {
-        self.streams_rx.values_mut()
+        sorted_by_key_mut(&mut self.streams_rx)
+            .into_iter()
+            .map(|(_, s)| s)
     }
 
     pub(crate) fn streams_tx(&mut self) -> impl Iterator<Item = &mut StreamTx> {
-        self.streams_tx.values_mut()
+        sorted_by_key_mut(&mut self.streams_tx)
+            .into_iter()
+            .map(|(_, s)| s)
     }
 
     pub(crate) fn ssrcs_tx(&self, mid: Mid) -> Vec<(Ssrc, Option<Ssrc>)> {
@@ -594,11 +604,11 @@ impl Streams {
     }
 
     pub(crate) fn first_ssrc_remote(&self) -> Ssrc {
-        *self.streams_rx.keys().next().unwrap_or(&0.into())
+        *self.streams_rx.keys().min().unwrap_or(&0.into())
     }
 
     pub(crate) fn first_ssrc_local(&mut self) -> Ssrc {
-        if let Some(ssrc) = self.streams_tx.keys().next() {
+        if let Some(ssrc) = self.streams_tx.keys().min() {
             // If there is some local Tx SSRC, use that.
             *ssrc
         } else {
@@ -637,7 +647,9 @@ impl Streams {
             queue.midrid = MidRid(MID_PROBE, None);
             queue
         });
-        let mut streams = self.streams_tx.values_mut();
+        let mut streams = sorted_by_key_mut(&mut self.streams_tx)
+            .into_iter()
+            .map(|(_, s)| s);
         std::iter::from_fn(move || {
             if let Some(stream) = streams.next() {
                 let mut queue = stream.queue_state(now);
@@ -687,12 +699,18 @@ impl Streams {
 
     /// An iterator over all the tx streams for a given mid.
     pub(crate) fn streams_tx_by_mid(&mut self, mid: Mid) -> impl Iterator<Item = &mut StreamTx> {
-        self.streams_tx.values_mut().filter(move |s| s.mid() == mid)
+        sorted_by_key_mut(&mut self.streams_tx)
+            .into_iter()
+            .map(|(_, s)| s)
+            .filter(move |s| s.mid() == mid)
     }
 
     /// An iterator over all the rx streams for a given mid.
     pub(crate) fn streams_rx_by_mid(&mut self, mid: Mid) -> impl Iterator<Item = &mut StreamRx> {
-        self.streams_rx.values_mut().filter(move |s| s.mid() == mid)
+        sorted_by_key_mut(&mut self.streams_rx)
+            .into_iter()
+            .map(|(_, s)| s)
+            .filter(move |s| s.mid() == mid)
     }
 
     pub(crate) fn reset_buffers_tx(&mut self, mid: Mid) {
