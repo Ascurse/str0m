@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, DefaultHasher};
 use std::time::{Duration, Instant};
 
 mod bit_pattern;
@@ -12,6 +14,14 @@ pub(crate) use time_tricks::{already_happened, epoch_to_beginning};
 
 mod average;
 pub(crate) use average::MovingAverage;
+
+/// `HashMap` with a fixed hasher, for maps whose iteration order is observable.
+///
+/// Iterating these maps decides pacer tie-breaks between queues, the order of RTCP
+/// reports and the order of stats events. With `RandomState` that order differs from
+/// run to run, so a seeded test or simulation can't be replayed. The maps are small
+/// and their keys come from negotiated streams.
+pub(crate) type DetHashMap<K, V> = HashMap<K, V, BuildHasherDefault<DefaultHasher>>;
 
 pub(crate) trait Soonest {
     fn soonest(self, other: Self) -> Self;
