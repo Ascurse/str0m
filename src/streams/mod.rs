@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt::{self};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +16,7 @@ use crate::rtp_::{Bitrate, Pt};
 use crate::rtp_::{DlrrItem, Rtcp, RtcpFb, RtpHeader};
 use crate::rtp_::{MediaTime, SenderInfo};
 use crate::rtp_::{Mid, Rid, SeqNo};
-use crate::util::already_happened;
+use crate::util::{DetHashMap, already_happened};
 
 pub use self::receive::StreamRx;
 pub use self::send::{RtpWrite, StreamTx, StreamTxQueueInfo};
@@ -124,17 +124,17 @@ impl RtpPacket {
 #[derive(Debug)]
 pub(crate) struct Streams {
     /// All incoming encoded streams.
-    streams_rx: HashMap<Ssrc, StreamRx>,
+    streams_rx: DetHashMap<Ssrc, StreamRx>,
 
     /// Each incoming SSRC is mapped to a Mid/Ssrc. The Ssrc in the value is for the case
     /// where the incoming SSRC is for an RTX and we want the "main".
-    rx_lookup: HashMap<Ssrc, RxLookup>,
+    rx_lookup: DetHashMap<Ssrc, RxLookup>,
 
     /// Time we last cleaned up unused entries from source_keys_rx.
     last_rx_lookup_cleanup: Instant,
 
     /// All outgoing encoded streams.
-    streams_tx: HashMap<Ssrc, StreamTx>,
+    streams_tx: DetHashMap<Ssrc, StreamTx>,
 
     /// Non-media padding source. Its sequence counter survives media changes.
     probe_tx: StreamTx,

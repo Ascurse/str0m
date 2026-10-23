@@ -1,12 +1,13 @@
 //! Statistics events.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use crate::Bitrate;
 use crate::rtp::SeqNo;
 use crate::rtp_::{Mid, Rid};
+use crate::util::DetHashMap;
 use crate::{io::Protocol, rtp_::MidRid};
 
 pub(crate) struct Stats {
@@ -23,8 +24,8 @@ pub(crate) struct StatsSnapshot {
     pub egress_loss_fraction: Option<f32>,
     pub ingress_loss_fraction: Option<f32>,
     pub rtt: Option<Duration>,
-    pub ingress: HashMap<MidRid, MediaIngressStats>,
-    pub egress: HashMap<MidRid, MediaEgressStats>,
+    pub ingress: DetHashMap<MidRid, MediaIngressStats>,
+    pub egress: DetHashMap<MidRid, MediaEgressStats>,
     pub bwe_tx: Option<Bitrate>,
     pub selected_candidate_pair: Option<CandidatePairStats>,
     timestamp: Instant,
@@ -39,8 +40,8 @@ impl StatsSnapshot {
             rx: 0,
             egress_loss_fraction: None,
             ingress_loss_fraction: None,
-            ingress: HashMap::new(),
-            egress: HashMap::new(),
+            ingress: DetHashMap::default(),
+            egress: DetHashMap::default(),
             rtt: None,
             bwe_tx: None,
             selected_candidate_pair: None,
